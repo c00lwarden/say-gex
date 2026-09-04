@@ -1,41 +1,55 @@
 package io.warden.portfolio;
 
-import com.mojang.blaze3d.platform.InputConstants;
-import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyMappingHelper;
-import net.minecraft.client.KeyMapping;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.resources.Identifier;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-/** Entry point for a deliberately client-only, non-gameplay-affecting demo mod. */
-public final class PortfolioClient implements ClientModInitializer {
-    public static final String MOD_ID = "portfolio_client";
-    public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+public final class DiagnosticHud {
+    private static long startedAt = System.currentTimeMillis();
+    private static long ticks;
+    private static long lastSampleAt;
+    private static int sampledFps;
+    private static long usedMemoryMiB;
+    private static long maxMemoryMiB;
 
-    private static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
-            Identifier.fromNamespaceAndPath(MOD_ID, "general"));
+    private DiagnosticHud() {}
 
-    private static final KeyMapping TOGGLE_HUD = KeyMappingHelper.registerKeyMapping(
-            new KeyMapping(
-                    "key.portfolio_client.toggle_hud",
-                    InputConstants.Type.KEYSYM,
-                    InputConstants.KEY_F8,
-                    CATEGORY));
+    public static void register() {
+        HudElementRegistry.attachElementBefore(
+                VanillaHudElements.CHAT,
+                Identifier.fromNamespaceAndPath(PortfolioClient.MOD_ID, "diagnostics"),
+                (graphics, delta) -> render(graphics));
+    }
 
-    @Override
-    public void onInitializeClient() {
-        DiagnosticHud.register();
+    public static void onClientTick() {
+        ticks++;
+        long now = System.currentTimeMillis();
+        if (now - lastSampleAt < 1_000L) return;
 
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            while (TOGGLE_HUD.consumeClick()) {
-                DiagnosticHud.toggle();
-                LOGGER.info("Diagnostics HUD: {}", DiagnosticHud.isVisible() ? "enabled" : "disabled");
-            }
-            DiagnosticHud.onClientTick();
-        });
+        lastSampleAt = now;
+        Runtime runtime = Runtime.getRuntime();
+        usedMemoryMiB = (runtime.totalMemory() - runtime.freeMemory()) / 1_048_576L;
+        maxMemoryMiB = runtime.maxMemory() / 1_048_576L;
+        sampledFps = Minecraft.getInstance().getFps();
+    }
 
-        LOGGER.info("Portfolio Client loaded. Press F8 to toggle diagnostics.");
+    private static void render(GuiGraphicsExtractor graphics) {
+        Minecraft client = Minecraft.getInstance();
+        long seconds = (System.currentTimeMillis() - startedAt) / 1_000L;
+        String uptime = String.format("%02d:%02d", seconds / 60L, seconds % 60L);
+
+        int x = 8;
+        int y = 8;
+        int line = client.font.lineHeight + 2;
+        int color = 0xFFE8F5E9;
+
+        graphics.fill(x - 4, y - 4, x + 188, y + line * 5 + 4, 0xAA101418);
+        graphics.text(client.font, "Portfolio Client — local diagnostics", x, y, color, true);
+        graphics.text(client.font, "FPS: " + sampledFps, x, y + line, color, true);
+        graphics.text(client.font, "Memory: " + usedMemoryMiB + " / " + maxMemoryMiB + " MiB", x, y + line * 2, color, true);
+        graphics.text(client.font, "Client uptime: " + uptime, x, y + line * 3, color, true);
+        graphics.text(client.font, "Ticks observed: " + ticks, x, y + line * 4, color, true);
     }
 }
